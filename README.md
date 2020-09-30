@@ -6,7 +6,7 @@ A "no frills" 1 class-only, C# .NET command line parser with support for - and /
 - Self contained (Simply drop into your project and call it below)
 
 
--	How to use [Example use cases]
+-	How to use
  	
  		// Utilizes Environment.CommandLine for its parsing
  		CmdLineHelper cmdline = new CmdLineHelper();
