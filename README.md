@@ -51,3 +51,4 @@ A "no frills" 1 class-only, C# .NET command line parser with support for - and /
 
 
 - Moivation to publically upload: @FuzzySec, a great security research :D. He needed something .NET 3.5 compat, and simple to integrate
+- Motivation to create: I like string manipulation, and necessity is the mother of invention. Didn't find any self-contained classes out there when needing this in 2015, so I started from the ground up, and slowly improved here and there over the years.
