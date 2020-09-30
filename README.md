@@ -11,7 +11,7 @@ A "no frills" 1 class-only, C# .NET command line parser with support for - and /
  		// Utilizes Environment.CommandLine for its parsing
  		CmdLineHelper cmdline = new CmdLineHelper();
    
-   // OR use your own.
+		 // OR use your own.
  		CmdLineHelper cmdline2 = new CmdLineHelper("some custom command line");
  		
 
