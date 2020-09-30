@@ -15,7 +15,7 @@ A "no frills" 1 class-only, C# .NET command line parser with support for - and /
  		CmdLineHelper cmdline2 = new CmdLineHelper("some custom command line");
  		
 
- 		// Creates an accessible list of args
+ 		// From above, the class creates an accessible list of args, accessible like so...
  		// List<CmdArg> Args
  		foreach(CmdArg in cmdline.Args) { //... }
  	
