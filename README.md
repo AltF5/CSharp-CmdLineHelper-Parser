@@ -48,3 +48,6 @@ A "no frills" 1 class-only, C# .NET command line parser with support for - and /
 
  		// Traditional CommandLineToArgvW API call with some features to preserve quotes or not
  		string[] args = CmdLineHelper.SupportMethods.CommandLineToArgs(Environment.CommandLine)
+
+
+- Moivation to publically upload: @FuzzySec, a great security research :D
