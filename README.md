@@ -1,9 +1,9 @@
 # C# CmdLineHelper.cs Command line Parser
 A "no frills" 1 class-only, C# .NET command line parser with support for - and / args, switches only, and Name : Values
 
-- Simple
-- Robust
-- Self contained. Simply drop into your project and call it below.
+- Simple (no depends)
+- Robust (many support methods)
+- Self contained (Simply drop into your project and call it below)
 
 
 -	How to use [Example use cases]
@@ -50,4 +50,4 @@ A "no frills" 1 class-only, C# .NET command line parser with support for - and /
  		string[] args = CmdLineHelper.SupportMethods.CommandLineToArgs(Environment.CommandLine)
 
 
-- Moivation to publically upload: @FuzzySec, a great security research :D
+- Moivation to publically upload: @FuzzySec, a great security research :D. He needed something .NET 3.5 compat, and simple to integrate
