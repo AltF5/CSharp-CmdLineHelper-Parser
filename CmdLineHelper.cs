@@ -1,11 +1,16 @@
-﻿
+
+#region Notes
+
 // Last update:
 // 8-20-15      - Created
 // 10-27-16     - Instance class so that there can be an instance for the App and an instance for any other string
 //                GetAnyArgName
 //                Fixed quoting issues, quotes disappearing, and now can supply [A] or [ALL] to have an entire command line be passed through and not parsed out int various args
 // 6-16-17      - Various fixes
-// 9-30-2020    - .NET 3.5 compat
+// 2020-9-30    - .NET 3.5 compat
+// 2020-10-28   - Added GetArgValueStartsWith & WasArgSuppliedStartsWith. 
+//                Also double "--" in front of special commands --disableSlash OR --disableDash
+
 // ------------------------------
 //
 // 
@@ -23,6 +28,8 @@
 //
 //
 //  *** Welcome to use this class as needed, but please credit source back to here. ***
+
+#endregion
 
 using System;
 using System.Collections.Generic;
@@ -135,29 +142,29 @@ public class CmdLineHelper
         /// <summary>
         /// Was the argument surrounded by [A] or [ALL] to ensure all subcommand line switches are preserved
         /// </summary>
-        public bool FullArgSupplied;
+        public bool WasFullArgSupplied;
 
         /// <summary>
-        /// Stores what was utilized to delimiter the argument - or /
+        /// Stores what was utilized to delimit the argument: - or /
         /// </summary>
-        public string ArgDelimiterUsed;
+        public string DelimiterUsed;
     }
 
     /// <summary>
     /// Checker variable, which determines if any argument was passed to this application (excluding the current executable as an argument)
     /// This is good for cases when the user may pass an argument but with no switch "-" or "/", since in that case Args.count would return 0 (if that was the checking condition instead, and hence not being expected).
     /// </summary>
-    private bool wasAnyArgSupplied = false;
-    public bool WasAnyArgSupplied
+    private bool wasAtLeast1ArgSupplied = false;
+    public bool WasAtLeast1ArgSupplied
     {
         get
         {
-            return wasAnyArgSupplied;
+            return wasAtLeast1ArgSupplied;
         }
 
         private set
         {
-            wasAnyArgSupplied = value;
+            wasAtLeast1ArgSupplied = value;
         }
     }
 
@@ -207,14 +214,14 @@ public class CmdLineHelper
 
     /// <summary>
     /// Allows for manual population for custom parsing of any commandline string.
-    /// When includeSpecialCommands is supplied, then -disabledash and -disableslash is ignored
+    /// When allowSpecialCommandInstructions is supplied, then -disabledash and -disableslash is ignored
     /// </summary>
-    public CmdLineHelper(string customCommandLine, bool includeSpecialCommands = false, bool disableDash = false, bool disableSlash = false)
+    public CmdLineHelper(string customCommandLine, bool removeFirstArgumentAsExePath = true, bool disableDash = false, bool disableSlash = false, bool allowSpecialCommandInstructions = true)
     {
         DisableDash = disableDash;
         DisableSlash = disableSlash;
 
-        PopulateArgData_InternalList(customCommandLine, includeSpecialCommands);
+        PopulateArgData_InternalList(customCommandLine, removeFirstArgumentAsExePath, allowSpecialCommandInstructions);
     }
 
     #endregion
@@ -350,7 +357,7 @@ public class CmdLineHelper
     /// </summary>
     /// <param argName="arg">The argument argName. Ex: "v" for when "-v" is specified</param>
     /// <returns></returns>
-    public string GetArgValue(string argName, out CmdArg argInfo)
+    public string GetArgValue(string argName, out CmdArg argInfo, bool startsWith = false)
     {
         string ret = "";
 
@@ -366,8 +373,20 @@ public class CmdLineHelper
             PopulateArgData_InternalList();
         }
 
-        // Perform lookup
-        CmdArg argFound = allCmdLines.FirstOrDefault(x => x.Name.ToLower() == argName.ToLower());
+        // Perform lookup...
+
+        CmdArg argFound = null;
+            
+        if(!startsWith)
+        {
+            // typical path - Match exact name
+            argFound = allCmdLines.FirstOrDefault(x => x.Name.ToLower() == argName.ToLower());
+        }
+        else
+        {
+            // atypical - StartsWith
+            argFound = allCmdLines.FirstOrDefault(x => x.Name.StartsWith(argName, StringComparison.CurrentCultureIgnoreCase));
+        }
 
         if (argFound != null)
         {
@@ -377,6 +396,30 @@ public class CmdLineHelper
         argInfo = argFound;
 
         return ret;
+    }
+
+    /// <summary>
+    /// Obtain an arguments value if the name starts with something. Such as -imp, -impers, -impersonate, -impersonation, by just checking if starts with "imp"
+    /// </summary>
+    public string GetArgValueStartsWith(string argNameStartsWith)
+    {
+        return GetArgValue(argNameStartsWith, out CmdArg ignore, true);
+    }
+
+    /// <summary>
+    /// Obtain an arguments value if the name starts with something. Such as -imp, -impers, -impersonate, -impersonation, by just checking if starts with "imp"
+    /// </summary>
+    public string GetArgValueStartsWith(string argNameStartsWith, out string exactArgNameSupplied)
+    {
+        exactArgNameSupplied = "";
+
+        string val = GetArgValue(argNameStartsWith, out CmdArg info, true);
+        if(info != null)
+        {
+            exactArgNameSupplied = info.Name;
+        }
+
+        return val;
     }
 
     public string GetArgValue_OrDefault(string argName, string defaultVal)
@@ -414,13 +457,46 @@ public class CmdLineHelper
     }
 
     /// <summary>
+    /// Checks to see if an argument was specified or not, based on it starting with some string. Such as -imp, -impers, -impersonate, -impersonation, by just checking if starts with "imp"
+    /// </summary>
+    public bool WasArgSuppliedStartsWith(string argNameStartsWith)
+    {
+        return WasArgSuppliedStartsWith(argNameStartsWith, out string ignore);
+    }
+
+    /// <summary>
+    /// Checks to see if an argument was specified or not, based on it starting with some string. Such as -imp, -impers, -impersonate, -impersonation, by just checking if starts with "imp"
+    /// </summary>
+    public bool WasArgSuppliedStartsWith(string argNameStartsWith, out string exactArgNameSupplied)
+    {
+        exactArgNameSupplied = "";
+
+        bool yes = WasArgSupplied(new string[] { argNameStartsWith }, out CmdArg info, true);
+        if (info != null)
+        {
+            exactArgNameSupplied = info.Name;
+        }
+
+        return yes;
+    }
+
+    /// <summary>
     /// Checks to see if any argument in the string array was specified or not
     /// </summary>
     /// <param argNames="argNames">An array of argument names. Ex: new string[] = { "1", "2" }</param>
-    /// <returns></returns>
-    public bool WasArgSupplied(string[] argNames)
+    public bool WasArgSupplied(string[] argNames, bool startWith = false)
+    {
+        return WasArgSupplied(argNames, out CmdArg ignore, startWith);
+    }
+
+    /// <summary>
+    /// Checks to see if any argument in the string array was specified or not
+    /// </summary>
+    /// <param argNames="argNames">An array of argument names. Ex: new string[] = { "1", "2" }</param>
+    public bool WasArgSupplied(string[] argNames, out CmdArg info, bool startWith = false)
     {
         bool ret = false;
+        info = new CmdArg();
 
         // Ensure that the arguments have already been initialized
         if (allCmdLines == null)
@@ -439,8 +515,23 @@ public class CmdLineHelper
                 argName = argName.Substring(1);
             }
 
-            // Perform lookup
-            CmdArg argFound = allCmdLines.FirstOrDefault(x => x.Name.ToLower() == argName.ToLower());
+            // Perform lookup...
+
+
+            CmdArg argFound = null;
+                
+            if(!startWith)
+            {
+                // Typical path
+                argFound = allCmdLines.FirstOrDefault(x => x.Name.ToLower() == argName.ToLower());
+            }
+            else
+            {
+                // Atypical - starts with check
+                argFound = allCmdLines.FirstOrDefault(x => x.Name.StartsWith(argName, StringComparison.CurrentCultureIgnoreCase));
+            }
+                
+            info = argFound;
 
             // Once one was found, then exit
             if (argFound != null)
@@ -469,15 +560,15 @@ public class CmdLineHelper
         allCmdLines = ParseArgs_NestingCheck(Environment.CommandLine);
     }
 
-    private void PopulateArgData_InternalList(string customCommandLine, bool includeSpecialCommands = false)
+    private void PopulateArgData_InternalList(string customCommandLine, bool removeFirstArgumentAsExePath = true, bool allowSpecialCommandInstructions = true)
     {
-        allCmdLines = ParseArgs_NestingCheck(customCommandLine, includeSpecialCommands);
+        allCmdLines = ParseArgs_NestingCheck(customCommandLine, removeFirstArgumentAsExePath, allowSpecialCommandInstructions);
     }
 
     /// <summary>
     /// Initializes an argument list (which will be returned) given a single linear string as the command line
     /// </summary>
-    private List<CmdArg> ParseArgs_NestingCheck(string commandLine, bool includeSpecialCommands = false)
+    private List<CmdArg> ParseArgs_NestingCheck(string commandLine, bool removeFirstArgumentAsExePath = true, bool allowSpecialCommandInstructions = true)
     {
         // TO TEST FURTHER
 
@@ -523,13 +614,13 @@ public class CmdLineHelper
                             // Remove this process as part of the command line
                             before = SupportMethods.SplitOutCmdLine(before);
 
-                            List<CmdArg> list = ParseArgs(SupportMethods.CommandLineToArgs(before.Trim() + " " + after.Trim()), includeSpecialCommands);
+                            List<CmdArg> list = ParseArgs(SupportMethods.CommandLineToArgs(before.Trim() + " " + after.Trim()), allowSpecialCommandInstructions);
 
                             string argName = switchExtracts[1].Replace("-", "");
 
                             list.Add(new CmdArg
                             {
-                                FullArgSupplied = true,               // Set indicator
+                                WasFullArgSupplied = true,               // Set indicator
                                 Name = argName.Substring(1).Trim(),
                                 Value = nestedCommandLine
                             });
@@ -544,16 +635,16 @@ public class CmdLineHelper
             }
         }
 
-        string[] args = SupportMethods.CommandLineToArgs(commandLine);
-        WasAnyArgSupplied = (args.Length >= 1);
+        string[] args = SupportMethods.CommandLineToArgs(commandLine, removeFirstArgAsExePath: removeFirstArgumentAsExePath);
+        WasAtLeast1ArgSupplied = (args.Length >= 1);
 
-        return ParseArgs(args, includeSpecialCommands);
+        return ParseArgs(args, allowSpecialCommandInstructions);
     }
 
     /// <summary>
     /// Core method - Initalizes an argument list (which will be returned) given a string array of command line arguments
     /// </summary>
-    private List<CmdArg> ParseArgs(string[] argArray, bool includeSpecialCommands = false)
+    private List<CmdArg> ParseArgs(string[] argArray, bool allowSpecialCommandInstructions = true)
     {
         // Note:
         // 'argArray' needs to be a linear list of Arg Name (ex: "-Say") followed next by its Arg Value (ex: "Hello"), Name, Value, ...
@@ -620,13 +711,13 @@ public class CmdLineHelper
                 //      -disableDash
                 // If found, then "-" or "/" will not be considered the start of a new argument
                 // This is an alternative to specifying [a] or [all] around a string such as:  -a [a] cmd.exe /k ... [a]   -->  -noSlash -a cmd.exe /k ...
-                if (!includeSpecialCommands && (DisableSlash || argStr.ToLower() == "-disableslash"))
+                if (allowSpecialCommandInstructions && (DisableSlash || argStr.ToLower() == "--disableslash"))
                 {
                     turnOffSlashSwitch = true;
                     WasDashOrSlashDisabled = true;
                     continue;
                 }
-                else if (!includeSpecialCommands && (DisableDash || argStr.ToLower() == "-disabledash"))
+                else if (allowSpecialCommandInstructions && (DisableDash || argStr.ToLower() == "--disabledash"))
                 {
                     turnOffDashSwitch = true;
                     WasDashOrSlashDisabled = true;
@@ -639,7 +730,7 @@ public class CmdLineHelper
 
                 if (passEverything && currArg != null)
                 {
-                    currArg.FullArgSupplied = true;
+                    currArg.WasFullArgSupplied = true;
 
                     startingPassAllIndicator = true;        // Prevention of setting disablePassEverything to true below when checking to see if the string is the ending [A]
                     startedPassAllRightNow = true;
@@ -690,7 +781,7 @@ public class CmdLineHelper
                 if (argStr.Length > 1)
                 {
                     // Store the argument Name
-                    currArg.ArgDelimiterUsed = argStr.Substring(0, 1);      //  the "-" or "/" char
+                    currArg.DelimiterUsed = argStr.Substring(0, 1);      //  the "-" or "/" char
                     currArg.Name = argStr.Substring(1);                     // Remove the "-" or "/" start of the argument Name
                     currentArgAdded = false;
                 }
@@ -726,7 +817,7 @@ public class CmdLineHelper
 
                         argStr = StringSupportMethods.ReplaceAny_NoCase(argStr, PASS_ALL_INDICATORS, "");
                     }
-                    else if (currArg.FullArgSupplied)
+                    else if (currArg.WasFullArgSupplied)
                     {
 
                         // 8-9-17
@@ -832,8 +923,6 @@ public class CmdLineHelper
     }
 
     #endregion
-
-
 
 
     #region Public Helper Class (StringSupportMethods)  for Support & Utility Methods
@@ -1286,5 +1375,4 @@ public class CmdLineHelper
 
 
     #endregion
-
 }
