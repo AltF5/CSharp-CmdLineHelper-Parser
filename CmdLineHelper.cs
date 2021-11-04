@@ -1,19 +1,29 @@
 
 #region Notes
 
-// Last update:
-// 8-20-15      - Created
-// 10-27-16     - Instance class so that there can be an instance for the App and an instance for any other string
+// -- Version History & Location --
+//
+// Public code location: https://github.com/AltF5/CSharp-CmdLineHelper-Parser
+//
+//
+// Update History:
+//
+// 2015.8.20    - Inception
+// 2016.10.27   - Instance class so that there can be an instance for the App and an instance for any other string
 //                GetAnyArgName
 //                Fixed quoting issues, quotes disappearing, and now can supply [A] or [ALL] to have an entire command line be passed through and not parsed out int various args
-// 6-16-17      - Various fixes
-// 2020-9-30    - .NET 3.5 compat
-// 2020-10-28   - Added GetArgValueStartsWith & WasArgSuppliedStartsWith. 
+// 2021.6.16      - Various fixes
+// 2020.9.30    - .NET 3.5 compat
+// 2020.10.28   - Added GetArgValueStartsWith & WasArgSuppliedStartsWith. 
 //                Also double "--" in front of special commands --disableSlash OR --disableDash
-
+//
+// 2020.12      - WasAtLeast1ArgSupplied - Determines if any argument was passed to this application (excluding the current executable as an argument)
+//                This is good for cases when the user may pass an argument but with no switch "-" or "/", since in that case Args.count would return 0 (if that was the checking condition instead, and hence not being expected).
+//
+// 2021.11.4   - Added 2 quick check methods not requiring the caller to create an instance of this class
+//               WasArgSupplied_QuickCheck, GetArgValue_QuickCheck
 // ------------------------------
 //
-// 
 // Special Notes:
 //    Passing a command line with "-" or "/" through:
 //       It is necessary to place [A] or [ALL] surrounding a command line which contains the special characters "-" or "/"
@@ -165,6 +175,20 @@ public class CmdLineHelper
         private set
         {
             wasAtLeast1ArgSupplied = value;
+        }
+    }
+
+    private bool wasAtLeast1ArgSWITCHSupplied = false;
+    public bool WasAtLeast1ArgSWITCHSupplied
+    {
+        get
+        {
+            return wasAtLeast1ArgSWITCHSupplied;
+        }
+
+        private set
+        {
+            wasAtLeast1ArgSWITCHSupplied = value;
         }
     }
 
@@ -636,9 +660,13 @@ public class CmdLineHelper
         }
 
         string[] args = SupportMethods.CommandLineToArgs(commandLine, removeFirstArgAsExePath: removeFirstArgumentAsExePath);
-        WasAtLeast1ArgSupplied = (args.Length >= 1);
+        wasAtLeast1ArgSupplied = (args.Length >= 1);
 
-        return ParseArgs(args, allowSpecialCommandInstructions);
+        var ret = ParseArgs(args, allowSpecialCommandInstructions);
+
+        wasAtLeast1ArgSWITCHSupplied = ret.Count > 0;
+
+        return ret;
     }
 
     /// <summary>
@@ -924,6 +952,42 @@ public class CmdLineHelper
 
     #endregion
 
+
+    #region Quick check Public-Static methods (not requiring caller to create an instance of)
+
+
+    static CmdLineHelper quickSelfInstance = null;
+
+    /// <summary>
+    /// A quick check, not requiring the caller to create an instance of CmdLineHelper if they want to simply check if an argument (switch) is present or not
+    /// For anything more, the caller should instantiate it own instance
+    /// </summary>
+    public static bool WasArgSupplied_QuickCheck(params object[] argAliases)
+    {
+        if(quickSelfInstance == null)
+        {
+            quickSelfInstance = new CmdLineHelper(Environment.CommandLine);
+        }
+
+        return quickSelfInstance.WasArgSupplied(argAliases);
+    }
+
+
+    /// <summary>
+    /// A quick Accessor, not requiring the caller to create an instance of CmdLineHelper if they want to simply check what an argument switch's value is (if present)
+    /// For anything more, the caller should instantiate it own instance
+    /// </summary>
+    public string GetArgValue_QuickCheck(params string[] argAliases)
+    {
+        if (quickSelfInstance == null)
+        {
+            quickSelfInstance = new CmdLineHelper(Environment.CommandLine);
+        }
+
+        return quickSelfInstance.GetArgValue(argAliases);
+    }
+
+    #endregion
 
     #region Public Helper Class (StringSupportMethods)  for Support & Utility Methods
 
