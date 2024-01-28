@@ -1,5 +1,5 @@
 
-#region Notes
+#region Notes & Ver history
 
 // -- Version History & Location --
 //
@@ -12,7 +12,7 @@
 // 2016.10.27   - Instance class so that there can be an instance for the App and an instance for any other string
 //                GetAnyArgName
 //                Fixed quoting issues, quotes disappearing, and now can supply [A] or [ALL] to have an entire command line be passed through and not parsed out int various args
-// 2021.6.16      - Various fixes
+// 2021.6.16    - Various fixes
 // 2020.9.30    - .NET 3.5 compat
 // 2020.10.28   - Added GetArgValueStartsWith & WasArgSuppliedStartsWith. 
 //                Also double "--" in front of special commands --disableSlash OR --disableDash
@@ -22,6 +22,39 @@
 //
 // 2021.11.4   - Added 2 quick check methods not requiring the caller to create an instance of this class
 //               WasArgSupplied_QuickCheck, GetArgValue_QuickCheck
+//
+// 2024.1.28    - File paths are now checked for a valid file (WHEN SET) for encountering special File args
+//                  
+//                Exmaple use case:
+//                CmdLineHelper cmdline = new CmdLineHelper(argsToTreatAsFinalFilePath: new string[] { "-a", "-app" },   checkForFilePaths_DontRequireAtEnd: true);
+//
+//               This adds the ability to treat an argument as a file path, without needing to specially surround it like with [a] [a] or |  |
+//               so long as it (1) Resolves to a file  and (2) is at the very end (is the last argument supplied), since it constructs this by concatenting all of the remaining parsed out arguments to the right
+//               See code: 'argsToTreatAsFinalFilePath' in ctors
+//               Why:
+//               This allows the ability to say (for exmaple) have the CmdLineHelper.cs implementer here to obtain a valid file to execute (properly resolves in an argument), to simply have this 
+//                  Now works
+//                      -a C:\Apps\test -dir\ToRun.exe
+//
+//                  When previosuly it required [a]  [a]  or  |   | since the path had a dash in it
+//                      -a [a] C:\Apps\test -dir\ToRun.exe [a]
+//
+//                      Note that this is specifically for handling when a - is preceded by a space, since   -a C:\Apps\test-dir\ToRun.exe    works fine, but a " -xyz" in a directory is the problem resolving as a user convenience
+//
+//                  Note that [a] [a] or |  | are still required if it is NOT the final argument, since the logic below assembles/constructs this based on ALL remaining arguments 
+//                      -a [a] C:\Apps\test -dir\ToRun.exe [a] -test
+//
+//                      Otherwise without [a] [a] it will fail to resolve this as a file, since its checking for   C:\Apps\test -dir\ToRun.exe -test
+//                      -a C:\Apps\test -dir\ToRun.exe -test
+//
+//
+//              - Further implemetnation above:
+//                checkForFilePaths_DontRequireAtEnd: true (default to true), then this is not required to exist at the end and can be anywhere in the commandline (as long as its flagged as a special arg)
+//
+//
+//
+//              - Region cleanup, comments added, and some variables renamed
+//
 // ------------------------------
 //
 // Special Notes:
@@ -93,17 +126,17 @@ using System.Text;
 
 public class CmdLineHelper
 {
-    #region Private Fields
-
     /// <summary>
-    /// Internal list of command line arguments.
-    /// This is a List of Key-Values representing an arugment. Populated via PopulateArgData_InternalList
+    /// FYI -- These are case insensitive
     /// </summary>
-    private List<CmdArg> allCmdLines; 
+    public static string[] PASS_ALL_INDICATORS = { "[A]", "[ALL]", "|" };
+    public bool DisableDash = false;
+    public bool DisableSlash = false;
 
-    // 3-3-19
-    //      No longer use System.Reflection.Assembly.GetExecutingAssembly().Location
-    //      this will return "" in the event that this assembly is loaded from memory (such as dynamic loading through "obfuscating")
+    #region 'thisExe' Support string
+
+    // 2019-3-3
+    //      Note that using System.Reflection.Assembly.GetExecutingAssembly().Location will return "" in the event that this assembly is loaded from memory (such as dynamic loading through "obfuscating")
     //
     //      Either of these work instead:       AppDomain.CurrentDomain.BaseDirectory
     //                               OR         Path.GetDirectoryName((new Uri(System.Reflection.Assembly.GetExecutingAssembly().CodeBase)).LocalPath)
@@ -112,53 +145,22 @@ public class CmdLineHelper
     //          Beware that Assembly.Location property returns the location of the assembly file after it is shadow-copied. In addition , if it is dynamically loaded using Load method, it returns empty string .
     //          As stated in the comments below, if you are interested in retrieving the location of the assembly before it is shadow-copied or loaded,  use Assembly.CodeBase property instead. 
 
-    //public static string thisExe = System.Reflection.Assembly.GetExecutingAssembly().Location;
-    //public static string thisExeDir = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+    // Alternative
+    //
+    //
+    public static string thisExe2 = System.Reflection.Assembly.GetExecutingAssembly().Location;
+    public static string thisExeDir2 = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
 
-    public static string thisExe = (new Uri(System.Reflection.Assembly.GetExecutingAssembly().CodeBase)).LocalPath;
-    public static string thisExeDir = Path.GetDirectoryName((new Uri(System.Reflection.Assembly.GetExecutingAssembly().CodeBase)).LocalPath);
-
-    #endregion
-
-    #region Public Items
-
-    #region Public Static Fields
-
-    /// <summary>
-    /// FYI -- These are case insensitive
-    /// </summary>
-    public static string[] PASS_ALL_INDICATORS = { "[A]", "[ALL]", "|" };
+    // Fix: 2020-2-16
+    //      Do not use new Uri(_).LocalPath which will break for dirs with # char in them. Instead conver the file:/// forward slash URI to an actual Windows path
+    //      For example do NOT do:   (new Uri(System.Reflection.Assembly.GetExecutingAssembly().CodeBase)).LocalPath
+    //      System.Reflection.Assembly.GetExecutingAssembly().CodeBase works just fine
+    public static string thisExe = System.Reflection.Assembly.GetExecutingAssembly().CodeBase.Replace("file:///", "").Replace("/", "\\");
+    public static string thisExeName = Path.GetFileNameWithoutExtension(thisExe);
 
     #endregion
 
-
-    #region Public Fields
-
-    public bool DisableDash = false;
-    public bool DisableSlash = false;
-
-    public class CmdArg
-    {
-        /// <summary>
-        /// (not letting this be null)
-        /// </summary>
-        public string Name = "";
-
-        /// <summary>
-        /// (not letting this be null)
-        /// </summary>
-        public string Value = "";
-
-        /// <summary>
-        /// Was the argument surrounded by [A] or [ALL] to ensure all subcommand line switches are preserved
-        /// </summary>
-        public bool WasFullArgSupplied;
-
-        /// <summary>
-        /// Stores what was utilized to delimit the argument: - or /
-        /// </summary>
-        public string DelimiterUsed;
-    }
+    #region Properties (public)
 
     /// <summary>
     /// Checker variable, which determines if any argument was passed to this application (excluding the current executable as an argument)
@@ -206,6 +208,43 @@ public class CmdLineHelper
         }
     }
 
+    #endregion
+
+    #region CmdArg UDT Structure (Class)
+
+    public class CmdArg
+    {
+        /// <summary>
+        /// (not letting this be null)
+        /// </summary>
+        public string Name = "";
+
+        /// <summary>
+        /// (not letting this be null)
+        /// </summary>
+        public string Value = "";
+
+        /// <summary>
+        /// Was the argument surrounded by [A] or [ALL] to ensure all subcommand line switches are preserved
+        /// </summary>
+        public bool WasFullArgSupplied;
+
+        /// <summary>
+        /// Stores what was utilized to delimit the argument: - or /
+        /// </summary>
+        public string DelimiterUsed;
+    }
+
+    #endregion
+
+    #region 'Args' List accessor (public)
+
+    /// <summary>
+    /// Internal list of command line arguments.
+    /// This is a List of Key-Values representing an arugment. Populated via PopulateArgData_InternalList
+    /// </summary>
+    private List<CmdArg> allCmdLines;
+
     /// <summary>
     /// Returns a list of CmdArgs each holding the Name and Value for every Argument
     /// This public accessor will allow for the utilization of Linq querying of certain criteria
@@ -228,7 +267,10 @@ public class CmdLineHelper
     #endregion
 
 
-    #region Constructors
+
+
+
+    #region Constructors - ctors
 
     public CmdLineHelper()
         : this(Environment.CommandLine)
@@ -236,20 +278,38 @@ public class CmdLineHelper
 
     }
 
+    public CmdLineHelper(string[] argsToTreatAsFinalFilePath, bool checkForFilePaths_DontRequireAtEnd = true)
+    {
+        PopulateArgData_InternalList(
+            Environment.CommandLine, 
+
+            // These 2 arguments are related. See ParseArgs
+            argsToTreatAsFinalFilePath:         argsToTreatAsFinalFilePath,
+            checkForFilePaths_DontRequireAtEnd: checkForFilePaths_DontRequireAtEnd
+            );
+    }
+
     /// <summary>
     /// Allows for manual population for custom parsing of any commandline string.
     /// When allowSpecialCommandInstructions is supplied, then -disabledash and -disableslash is ignored
     /// </summary>
-    public CmdLineHelper(string customCommandLine, bool removeFirstArgumentAsExePath = true, bool disableDash = false, bool disableSlash = false, bool allowSpecialCommandInstructions = true)
+    public CmdLineHelper(
+        string customCommandLine, 
+        bool removeFirstArgumentAsExePath = true, 
+        bool disableDash = false, 
+        bool disableSlash = false, 
+        bool allowSpecialCommandInstructions = true,
+        string[] argsToTreatAsFinalFilePath = null, 
+        bool checkForFilePaths_DontRequireAtEnd = true
+        )
     {
         DisableDash = disableDash;
         DisableSlash = disableSlash;
 
-        PopulateArgData_InternalList(customCommandLine, removeFirstArgumentAsExePath, allowSpecialCommandInstructions);
+        PopulateArgData_InternalList(customCommandLine, removeFirstArgumentAsExePath, allowSpecialCommandInstructions, argsToTreatAsFinalFilePath, checkForFilePaths_DontRequireAtEnd);
     }
 
     #endregion
-
 
     #region Public Arg query methods
 
@@ -570,8 +630,6 @@ public class CmdLineHelper
 
     #endregion
 
-    #endregion
-
     #region Private Parser Methods
 
     /// <summary>
@@ -584,22 +642,33 @@ public class CmdLineHelper
         allCmdLines = ParseArgs_NestingCheck(Environment.CommandLine);
     }
 
-    private void PopulateArgData_InternalList(string customCommandLine, bool removeFirstArgumentAsExePath = true, bool allowSpecialCommandInstructions = true)
+    private void PopulateArgData_InternalList(
+        string customCommandLine, 
+        bool removeFirstArgumentAsExePath = true, 
+        bool allowSpecialCommandInstructions = true,
+        string[] argsToTreatAsFinalFilePath = null,
+        bool checkForFilePaths_DontRequireAtEnd = true)
     {
-        allCmdLines = ParseArgs_NestingCheck(customCommandLine, removeFirstArgumentAsExePath, allowSpecialCommandInstructions);
+        allCmdLines = ParseArgs_NestingCheck(customCommandLine, removeFirstArgumentAsExePath, allowSpecialCommandInstructions, argsToTreatAsFinalFilePath, checkForFilePaths_DontRequireAtEnd);
     }
 
     /// <summary>
     /// Initializes an argument list (which will be returned) given a single linear string as the command line
     /// </summary>
-    private List<CmdArg> ParseArgs_NestingCheck(string commandLine, bool removeFirstArgumentAsExePath = true, bool allowSpecialCommandInstructions = true)
+    private List<CmdArg> ParseArgs_NestingCheck(
+        string commandLine, 
+        bool removeFirstArgumentAsExePath = true, 
+        bool allowSpecialCommandInstructions = true,
+        string[] argsToTreatAsFinalFilePath = null,
+        bool checkForFilePaths_DontRequireAtEnd = true)
     {
-        // TO TEST FURTHER
-
         bool isAll = StringSupportMethods.ContainsNoCase(commandLine, "[ALL1]");
         bool nestingSupplied = isAll || StringSupportMethods.ContainsNoCase(commandLine, "[A1]");
         //bool all2 = ContainsNoCase(commandLine, "[ALL2]") || ContainsNoCase(commandLine, "[A2]");
 
+
+        // Pre-check and Pre-parse
+        //
         if (nestingSupplied)
         {
             string toFind = "";
@@ -638,7 +707,11 @@ public class CmdLineHelper
                             // Remove this process as part of the command line
                             before = SupportMethods.SplitOutCmdLine(before);
 
-                            List<CmdArg> list = ParseArgs(SupportMethods.CommandLineToArgs(before.Trim() + " " + after.Trim()), allowSpecialCommandInstructions);
+
+                            //
+                            // Parse args
+                            //
+                            List<CmdArg> list = ParseArgs(SupportMethods.CommandLineToArgs(before.Trim() + " " + after.Trim()), allowSpecialCommandInstructions, argsToTreatAsFinalFilePath, checkForFilePaths_DontRequireAtEnd);
 
                             string argName = switchExtracts[1].Replace("-", "");
 
@@ -659,10 +732,17 @@ public class CmdLineHelper
             }
         }
 
+
+
+
+
         string[] args = SupportMethods.CommandLineToArgs(commandLine, removeFirstArgAsExePath: removeFirstArgumentAsExePath);
         wasAtLeast1ArgSupplied = (args.Length >= 1);
 
-        var ret = ParseArgs(args, allowSpecialCommandInstructions);
+        //
+        // Parse args
+        //
+        var ret = ParseArgs(args, allowSpecialCommandInstructions, argsToTreatAsFinalFilePath: argsToTreatAsFinalFilePath, checkForFilePaths_DontRequireAtEnd: checkForFilePaths_DontRequireAtEnd);
 
         wasAtLeast1ArgSWITCHSupplied = ret.Count > 0;
 
@@ -670,12 +750,27 @@ public class CmdLineHelper
     }
 
     /// <summary>
-    /// Core method - Initalizes an argument list (which will be returned) given a string array of command line arguments
+    /// Core method - Initalizes an argument list (which will be returned) given a string array of command line arguments ('argsArray'
+    /// 
+    ///     Note that:
+    ///     'argArray' may or may not be the true arugments constructed.
+    ///     This method takes this array (from say CommandLineToArgvW which splits based on spaces (and quotes)) and then smartly constructs it based on logic it is looking for (to combine or treat as separate)
+    ///     until it finds another token '-' or '/'   OR handles specially with [a] [a]  and  |  |
+    ///     
+    /// 
+    ///     'checkForFilePaths_DontRequireAtEnd' only matters if 'argsToTreatAsFinalFilePath' isn't null
+    ///     This controls the implementation of "how far" to check for File Existance. When true, it will not require that this is only performed for all remaining args, 
+    ///     but rather proceed to the next args, where this File.Exists was found (meaning these can then occur in the middle)
     /// </summary>
-    private List<CmdArg> ParseArgs(string[] argArray, bool allowSpecialCommandInstructions = true)
+    private List<CmdArg> ParseArgs(string[] argArray, bool allowSpecialCommandInstructions = true, string[] argsToTreatAsFinalFilePath = null, bool checkForFilePaths_DontRequireAtEnd = true)
     {
         // Note:
-        // 'argArray' needs to be a linear list of Arg Name (ex: "-Say") followed next by its Arg Value (ex: "Hello"), Name, Value, ...
+        //      'argArray' needs to be a linear list of Arg Name (ex: "-hello") followed next by its Arg Value (ex: "Hello"), Name, Value, ...
+        //      Essentially argArray is a split apart string of tokens based on spaces (and quotes), but this method 'reconstructs' this back together
+        //
+        // Now adding support to [A] nesting like [A1] [A1], [A2] [A2] (possibly add support for any number later)...
+        //      See the parent method ParseArgs_NestingCheck
+        //
 
         List<CmdArg> retList = new List<CmdArg>();
 
@@ -683,16 +778,13 @@ public class CmdLineHelper
         bool currentArgAdded = true;                // (true: start out like a previous argument was successfully added)
 
 
-
         // Flag used to prevent checking for "-" or "/" in parameters that are nested and meant to be passed on to the next application's command line, 
         // which will also use the same special characters.
         bool passEverything = false;
+
         bool startingPassAllIndicator = false;
         bool startedPassAllRightNow = false;
 
-
-        // Now adding support to [A] nesting like [A1] [A1], [A2] [A2] (possibly add support for any number later)...
-        // See ParseArgs_NestingCheck
 
 
         // Arguments here within the argArray will be separated out by spaces (like a split on " ")
@@ -703,10 +795,9 @@ public class CmdLineHelper
         bool turnOffSlashSwitch = false;
         bool turnOffDashSwitch = false;
 
-        for (int i = 0; i < argArray.Length; i++)
+        for (int indexOn = 0; indexOn < argArray.Length; indexOn++)
         {
-            var argStr = argArray[i].Trim();
-
+            var argStr = argArray[indexOn].Trim();
 
             // 8-9-17
             // Always reset -- only set on first encountered [a]
@@ -731,7 +822,8 @@ public class CmdLineHelper
 
 
             // Always recheck to see if the current argument begins with the "include-everything", which is a single double-quote (but the argName / caller has to escape it via 3 double quotes: """)
-            // This is re-evaluated below 
+            // This is re-evaluated below
+            //
             if (passEverything == false)
             {
                 // Special args:
@@ -778,6 +870,8 @@ public class CmdLineHelper
             }
 
 
+
+
             //
             // New arg or not?
             //
@@ -787,10 +881,10 @@ public class CmdLineHelper
                ((!turnOffDashSwitch && argStr.StartsWith("-")) ||
                  (!turnOffSlashSwitch && argStr.StartsWith("/"))))
             {
-                //
-                // New argument to add
-                //
 
+                //
+                // -- NEW --  argument to add
+                //
                 startOfNewArgument = true;
 
                 // If a new arg was encountered before the previous argument's value, then simply add in the previous argument
@@ -805,6 +899,7 @@ public class CmdLineHelper
                 }
 
                 // Start the new arg 
+                //
                 currArg = new CmdArg();
                 if (argStr.Length > 1)
                 {
@@ -814,6 +909,75 @@ public class CmdLineHelper
                     currentArgAdded = false;
                 }
 
+
+                // New 2024 - Check for file paths (File.Exists) IF a specially flagged (from the ctor) was encountered
+                //
+                if (argsToTreatAsFinalFilePath != null && argsToTreatAsFinalFilePath.FirstOrDefault(a => a.Equals(argStr, StringComparison.CurrentCultureIgnoreCase)) != null)
+                {
+                    //
+                    // Jan 2024 - New support has now been added this special case check to see if encountering this special argument, if it resolves to a valid File Path (File.Exists) for all of the remaining arguments constructed to the right
+                    //
+                    //      If this is a specially-specific argument (as indicated in the ctor) to treat it as a File Path, then check if the file exists.  [MUST BE THE LAST ARGUMENT -- otherwis this check will not work]
+                    //      This allows the ability to have - dashes in the file path are not split out into other arguments prematurely.
+                    //      This is simply done by checking if the file exists for this string
+                    //      Requires: This special arg to be the last one in the string
+                    //
+
+                    if(!checkForFilePaths_DontRequireAtEnd)
+                    {
+                        //
+                        // Impl 1:
+                        //      Read all the way to the end (All remaining args ... meaning this special File-check arg needs to be the last one in the list
+
+                        // Advance the array to see if everything after this makes up a valid File name
+                        string construtedToCheck = "";
+                        for (int indexOn_Next = indexOn + 1; indexOn_Next < argArray.Length; indexOn_Next++)
+                        {
+                            construtedToCheck += argArray[indexOn_Next] + " ";
+                        }
+
+                        construtedToCheck = construtedToCheck.Trim();
+                        if (File.Exists(construtedToCheck))
+                        {
+                            // FOUND a Valid File. Stop everything now, since this needs to be at the very end of a string, and thus is the 1 special case
+                            currArg.Value = construtedToCheck;
+                            retList.Add(currArg);
+                            return retList;
+                        }
+
+                    }
+                    else
+                    {
+                        //
+                        // Impl 2:
+                        //      Allow for a special arg like this to occur in the middle, and not at the end, to check all the next arguments until reaching a valid File (File.Exists)
+                        //      or otherwise if not, then just proceed.
+                        //
+                        //      If yes, it was found, then set the next argument index to where this stopped
+
+                        string construtedToCheck = "";
+                        for (int indexOn_Next = indexOn + 1; indexOn_Next < argArray.Length; indexOn_Next++)
+                        {
+                            construtedToCheck += argArray[indexOn_Next] + " ";
+
+                            if(File.Exists(construtedToCheck.Trim()))
+                            {
+                                currArg.Value = construtedToCheck.Trim();
+
+                                // Advance the outer-loop index to the next.
+                                // Break this inner loop
+                                // Below, this argument will get added.
+                                // Then the outer loop will just proceed as normal, using this index as the next one
+
+                                //indexOn = indexOn_Next + 1;       // Advance it, but Do NOT advance it +1. The outer-loop will take care of that with indexOn++
+                                indexOn = indexOn_Next;             //    rather, just set it equal to where we are now at.
+                                break;
+                            }
+                        }
+                    }
+
+
+                }
             }
             else
             {
@@ -869,7 +1033,7 @@ public class CmdLineHelper
                         }
 
 
-                        // Fix / Check - 11-13-16
+                        // Fix / Check - 11-13-2016
                         // Before replacing [A] or [ALL], need to check if the string already ends with [A] or [ALL] in the event that no space was provided in the trailing [a] or [all]
                         // Ex: -s [a]-2[a] -d hello     -s would incorrectly include everything else
                         //     -s [a]-a [a] -d hello    This would work, but we don't want to rely on the user having to remember that a space in the trailing [a] is required
@@ -932,6 +1096,16 @@ public class CmdLineHelper
         }       // foreach arg
 
 
+
+
+
+
+
+        //
+        // Make this 1 arg official.
+        //
+
+
         // If this loop finished (no more arguments), and the last argument wasn't added (it didn't have a value) then add it in
         if (currentArgAdded == false)
         {
@@ -951,7 +1125,6 @@ public class CmdLineHelper
     }
 
     #endregion
-
 
     #region Quick check Public-Static methods (not requiring caller to create an instance of)
 
@@ -1295,7 +1468,7 @@ public class CmdLineHelper
 
         public static string ReplaceNoCase(string str, string oldValue, string newValue, StringComparison comparison = StringComparison.CurrentCultureIgnoreCase)
         {
-            // Allows for specification of Case-Insenstive replacement. .Replace is Case-senstive
+            // Allows for specification of Case-Insensitive replacement. .Replace is Case-sensitive
             //      From: stackoverflow.com/questions/244531/is-there-an-alternative-to-string-replace-that-is-case-insensitive
 
             StringBuilder sb = new StringBuilder();
