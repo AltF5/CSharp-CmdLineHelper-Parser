@@ -55,6 +55,10 @@
 //
 //              - Region cleanup, comments added, and some variables renamed
 //
+//
+// 2026.1.19    - Now removes non .exe matching the exe name when calling CmdLineHelper.SupportMethods.CurrentArgsStrWithoutExe
+//                Also affects: SupportMethods.CommandLineToArgs  &   RemoveThisExeArg (where the change is made in)
+//
 // ------------------------------
 //
 // Special Notes:
@@ -1367,7 +1371,8 @@ public class CmdLineHelper
             List<string> retList = new List<string>();
             if (args.Length > 0 &&
                 (args[0].Replace("\"", "").ToLower() == thisExe.ToLower() ||
-                 args[0].Replace("\"", "").ToLower() == Path.GetFileName(thisExe).ToLower() ||      // could just be the .exe
+                 args[0].Replace("\"", "").ToLower() == Path.GetFileName(thisExe).ToLower() ||                      // could just be the .exe
+                 args[0].Replace("\"", "").ToLower() == Path.GetFileNameWithoutExtension(thisExe).ToLower() ||      // could just be the exe name WITHOUT .exe
                  System.Diagnostics.Debugger.IsAttached))        // The .exe will be named .vshost.exe so it won't match. Therefore must proceed anyway
             {
                 retList = new List<string>(ret);
